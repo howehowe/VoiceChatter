@@ -45,6 +45,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
+				AdditionalIncludeDirectories="../../kgplayerroot/KGPlayer/common/;../../kgplayerroot/KGPlayer/;../../kgplayerroot/KGPlayer/third_party;../../kgplayerroot/KGPlayer/third_party/chromium"
 				PreprocessorDefinitions="WIN32;_WINDOWS;_DEBUG"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -67,7 +68,9 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalDependencies="strmbasd.lib common.lib Winmm.lib"
 				LinkIncremental="2"
+				AdditionalLibraryDirectories="&quot;..\..\KGPlayerRoot\$(ConfigurationName)\lib&quot;"
 				GenerateDebugInformation="true"
 				SubSystem="2"
 				TargetMachine="1"
@@ -264,5 +267,9 @@
 		</File>
 	</Files>
 	<Globals>
+		<Global
+			Name="RESOURCE_FILE"
+			Value="VoiceChatter.rc"
+		/>
 	</Globals>
 </VisualStudioProject>
