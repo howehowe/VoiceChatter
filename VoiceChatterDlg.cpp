@@ -128,6 +128,40 @@ void UtilDeleteMediaType(AM_MEDIA_TYPE *pmt)
     CoTaskMemFree((PVOID)pmt);
 }
 
+HRESULT loadFilterFromStandardAxFile(wchar_t* str, const CLSID& classID, 
+                                     IUnknown** filter)
+{
+    HMODULE m = LoadLibrary(str);
+    if (!m)
+        return E_FAIL;
+
+    typedef HRESULT (__stdcall* dllGetClassObjectProc)(const IID&, const IID&,
+        void**);
+    typedef HRESULT (__stdcall* dllCanUnloadNowProc)();
+
+    dllGetClassObjectProc getObjProc =
+        reinterpret_cast<dllGetClassObjectProc>(GetProcAddress(
+        m, "DllGetClassObject"));
+
+    dllCanUnloadNowProc canUnloadProc =
+        reinterpret_cast<dllCanUnloadNowProc>(GetProcAddress(
+        m, "DllCanUnloadNow"));
+    if (!getObjProc || !canUnloadProc)
+        return E_FAIL;
+
+    intrusive_ptr<IClassFactory> factory;
+    HRESULT r = getObjProc(classID, IID_IClassFactory,
+        reinterpret_cast<void**>(&factory));
+    if (SUCCEEDED(r))
+        r = factory->CreateInstance(NULL, IID_IBaseFilter, (void**)filter);
+
+    if (FAILED(r))
+        return r;
+
+    return S_OK;
+}
+
+
 // 用于应用程序“关于”菜单项的 CAboutDlg 对话框
 
 class CAboutDlg : public CDialog
@@ -532,12 +566,17 @@ bool CVoiceChatterDlg::buildMicrophoneGraph( int filterIndex, int pinIndex )
     if (FAILED(r))
         return false;
 
-    intrusive_ptr<IBaseFilter> renderer;
+    // {E186957C-F18E-4cc9-8115-CB95AF5ED4C6}
+    static const GUID CLSID_SpeexEncodeFilter =
+    { 0xe186957c, 0xf18e, 0x4cc9, { 0x81, 0x15, 0xcb, 0x95, 0xaf, 0x5e, 0xd4, 0xc6 } };
 
-    r = CoCreateInstance(CLSID_AudioRender, 
-        NULL, CLSCTX_INPROC_SERVER,IID_IBaseFilter,
-        reinterpret_cast<void**>(&renderer));
+    intrusive_ptr<IBaseFilter> encoder;
+    r = loadFilterFromStandardAxFile(L"kg_speex.dll",CLSID_SpeexEncodeFilter, (IUnknown**)&encoder);
 
+    if (FAILED(r))
+        return false;
+
+    r = m_graphBuilder->AddFilter(encoder.get(), L"Speex Encoder");
     if (FAILED(r))
         return false;
 
@@ -549,22 +588,53 @@ bool CVoiceChatterDlg::buildMicrophoneGraph( int filterIndex, int pinIndex )
     if (FAILED(r))
         return false;
 
-    r = m_graphBuilder->AddFilter((IBaseFilter *)renderer.get(), L"DShow Render");
-    if (FAILED(r))
-        return false;
-
-    intrusive_ptr<IPin> rendererInputPin;
-    r = GetPinByDirection(renderer.get(), 
-        reinterpret_cast<IPin**>(&rendererInputPin), 
+    intrusive_ptr<IPin> encoderinPin;
+    r = GetPinByDirection(encoder.get(), 
+        reinterpret_cast<IPin**>(&encoderinPin), 
         PINDIR_INPUT);
 
     if (FAILED(r))
         return false;
 
-
-    r = m_graphBuilder->ConnectDirect(sourceOutPin.get(), rendererInputPin.get(), NULL);
+    r = m_graphBuilder->ConnectDirect(sourceOutPin.get(), encoderinPin.get(), NULL);
     if (FAILED(r))
-        return false;  
+        return false;
+
+    
+    // {292D31F6-2553-4d98-B46C-10E404F25D04}
+    static const GUID CLSID_NullRenderFilter =
+    {0x292d31f6, 0x2553, 0x4d98,{ 0xb4, 0x6c, 0x10, 0xe4, 0x4, 0xf2, 
+    0x5d, 0x4}};
+
+    intrusive_ptr<IBaseFilter> nullRender;
+    r = loadFilterFromStandardAxFile(L"kg_null.dll",CLSID_NullRenderFilter, (IUnknown**)&nullRender);
+
+    if (FAILED(r))
+        return false;
+
+    r = m_graphBuilder->AddFilter(nullRender.get(), L"NULL Renderer");
+    if (FAILED(r))
+        return false;
+
+    intrusive_ptr<IPin> encoderOutPin;
+    r = GetPinByDirection(encoder.get(), 
+        reinterpret_cast<IPin**>(&encoderOutPin), 
+        PINDIR_OUTPUT);
+
+    if (FAILED(r))
+        return false;
+
+    intrusive_ptr<IPin> nullRenderinPin;
+    r = GetPinByDirection(nullRender.get(), 
+        reinterpret_cast<IPin**>(&nullRenderinPin), 
+        PINDIR_INPUT);
+
+    if (FAILED(r))
+        return false;
+
+    r = m_graphBuilder->ConnectDirect(encoderOutPin.get(), nullRenderinPin.get(), NULL);
+    if (FAILED(r))
+        return false;
 
     return true;
 }
@@ -732,7 +802,7 @@ HRESULT CVoiceChatterDlg::SetAudioProperties( IBaseFilter* filter )
     IAMBufferNegotiation *pNeg=0;
     IAMStreamConfig *pCfg=0;
     int nFrequency=8000;
-    int nChannels = 2;
+    int nChannels = 1;
     int nBytesPerSample = 2;
     // Determine audio properties
     //     int nChannels = IsDlgButtonChecked(IDC_RADIO_MONO) ? 1 : 2;
